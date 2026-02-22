@@ -1,11 +1,12 @@
 from typing import List
+from sentence_transformers import SentenceTransformer
 
 
 class RAGPipeline:
     """
     Core RAG system:
     - Text chunking
-    - (Next: Embedding generation)
+    - Embedding generation
     - (Next: Vector indexing)
     - (Next: Retrieval)
     - (Next: Answer generation)
@@ -13,6 +14,8 @@ class RAGPipeline:
 
     def __init__(self):
         self.chunks = []
+        self.embeddings = None
+        self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
         """
@@ -30,3 +33,13 @@ class RAGPipeline:
 
         self.chunks = chunks
         return chunks
+
+    def generate_embeddings(self):
+        """
+        Generate embeddings for stored chunks.
+        """
+        if not self.chunks:
+            raise ValueError("No chunks available. Run chunk_text first.")
+
+        self.embeddings = self.embedding_model.encode(self.chunks)
+        return self.embeddings
