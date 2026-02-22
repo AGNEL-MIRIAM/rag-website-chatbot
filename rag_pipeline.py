@@ -1,31 +1,32 @@
-"""
-rag_pipeline.py
+from typing import List
 
-Handles embedding generation, vector storage, 
-retrieval logic, and response generation.
-"""
 
 class RAGPipeline:
     """
     Core RAG system:
     - Text chunking
-    - Embedding generation
-    - Vector indexing
-    - Context retrieval
-    - LLM response generation
+    - (Next: Embedding generation)
+    - (Next: Vector indexing)
+    - (Next: Retrieval)
+    - (Next: Answer generation)
     """
 
     def __init__(self):
-        pass
+        self.chunks = []
 
-    def build_vector_store(self, text: str):
-        """Build vector database from website text."""
-        pass
+    def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+        """
+        Splits text into overlapping word-based chunks.
+        """
+        words = text.split()
+        chunks = []
 
-    def retrieve(self, query: str):
-        """Retrieve relevant chunks for a query."""
-        pass
+        start = 0
+        while start < len(words):
+            end = start + chunk_size
+            chunk = words[start:end]
+            chunks.append(" ".join(chunk))
+            start += chunk_size - overlap
 
-    def generate_answer(self, query: str):
-        """Generate grounded answer using retrieved context."""
-        pass
+        self.chunks = chunks
+        return chunks
