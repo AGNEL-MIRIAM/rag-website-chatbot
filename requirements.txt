@@ -1,7 +1,7 @@
 streamlit
-beautifulsoup4
 requests
+beautifulsoup4
 sentence-transformers
 faiss-cpu
-transformers
-torch
+groq
+numpy
