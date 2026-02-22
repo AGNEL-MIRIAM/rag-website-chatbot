@@ -1,99 +1,70 @@
-from typing import List
 from sentence_transformers import SentenceTransformer
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from groq import Groq
 import faiss
 import numpy as np
-import torch
-
 
 class RAGPipeline:
-    """
-    Complete RAG System:
-    - Text chunking
-    - Embedding generation
-    - FAISS vector indexing
-    - Semantic retrieval
-    - LLM answer generation
-    """
-
-    def __init__(self):
-        # Embedding model
+    def __init__(self, groq_api_key: str):
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-        # LLM model
-        self.llm_name = "google/flan-t5-base"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.llm_name)
-        self.llm_model = AutoModelForSeq2SeqLM.from_pretrained(self.llm_name)
-
+        self.client = Groq(api_key=groq_api_key)
         self.chunks = []
-        self.embeddings = None
         self.index = None
 
-    def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    def chunk_text(self, text: str, chunk_size: int = 150, overlap: int = 30):
         words = text.split()
         chunks = []
-
         start = 0
         while start < len(words):
             end = start + chunk_size
-            chunk = words[start:end]
-            chunks.append(" ".join(chunk))
+            chunks.append(" ".join(words[start:end]))
             start += chunk_size - overlap
+        self.chunks = [c for c in chunks if len(c.strip()) > 40]
 
-        self.chunks = chunks
-        return chunks
+    def build_knowledge_base(self, text: str):
+        self.chunk_text(text)
+        print(f"Built knowledge base with {len(self.chunks)} chunks")
 
-    def generate_embeddings(self):
-        if not self.chunks:
-            raise ValueError("No chunks available. Run chunk_text first.")
+        embeddings = self.embedding_model.encode(self.chunks, show_progress_bar=True)
+        embeddings = np.array(embeddings).astype("float32")
+        faiss.normalize_L2(embeddings)
 
-        self.embeddings = self.embedding_model.encode(self.chunks)
-        return self.embeddings
-
-    def build_vector_store(self):
-        if self.embeddings is None:
-            raise ValueError("No embeddings available. Run generate_embeddings first.")
-
-        embeddings = np.array(self.embeddings).astype("float32")
-        dimension = embeddings.shape[1]
-
-        self.index = faiss.IndexFlatL2(dimension)
+        self.index = faiss.IndexFlatIP(embeddings.shape[1])
         self.index.add(embeddings)
+        print("FAISS index ready.")
 
-    def retrieve(self, query: str, k: int = 3):
-        if self.index is None:
-            raise ValueError("Vector store not built. Run build_vector_store first.")
+    def generate_answer(self, query: str, k: int = 5) -> str:
+        # Embed and retrieve
+        query_emb = self.embedding_model.encode([query])
+        query_emb = np.array(query_emb).astype("float32")
+        faiss.normalize_L2(query_emb)
 
-        query_embedding = self.embedding_model.encode([query])
-        query_embedding = np.array(query_embedding).astype("float32")
+        distances, indices = self.index.search(query_emb, k)
+        retrieved = [
+            self.chunks[idx]
+            for idx, dist in zip(indices[0], distances[0])
+            if dist > 0.2 and idx < len(self.chunks)
+        ]
 
-        distances, indices = self.index.search(query_embedding, k)
-        retrieved_chunks = [self.chunks[i] for i in indices[0]]
+        if not retrieved:
+            return "Could not find relevant content for this question."
 
-        return retrieved_chunks
+        context = "\n\n".join(retrieved)
 
-    def generate_answer(self, query: str, k: int = 3):
-        retrieved_chunks = self.retrieve(query, k)
-        context = " ".join(retrieved_chunks)
-
-        prompt = f"""
-        Answer the question based only on the context below.
-
-        Context:
-        {context}
-
-        Question:
-        {query}
-
-        Answer:
-        """
-
-        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024)
-
-        outputs = self.llm_model.generate(
-            **inputs,
-            max_new_tokens=150
+        # Call Groq LLM
+        response = self.client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant. Answer questions based only on the provided context. Be concise and accurate."
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer based only on the context above:"
+                }
+            ],
+            temperature=0.2,
+            max_tokens=300
         )
 
-        answer = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return answer
+        return response.choices[0].message.content
