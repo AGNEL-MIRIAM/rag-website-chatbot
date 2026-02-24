@@ -1,55 +1,78 @@
-"""
-app.py
-
-Streamlit frontend for RAG Website Chatbot
-"""
-
-import streamlit as st
+import os
+from flask import Flask, render_template, request, jsonify
 from scraper import scrape_website
 from rag_pipeline import RAGPipeline
 
-st.set_page_config(page_title="RAG Website Chatbot")
-st.title("🌐 RAG-Powered Website Chatbot")
+app = Flask(__name__)
 
-st.markdown("Enter a website URL and ask questions based on its content.")
+# Load Groq API key from environment
+groq_api_key = os.getenv("GROQ_API_KEY")
 
-# Sidebar
-st.sidebar.title("Configuration")
-groq_api_key = st.sidebar.text_input("Groq API Key", type="password")
+if not groq_api_key:
+    raise ValueError("GROQ_API_KEY environment variable not set.")
 
-if "pipeline" not in st.session_state:
-    st.session_state.pipeline = None
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
 
-url = st.text_input("Website URL")
+# Home Page
 
-if st.button("Build Knowledge Base"):
-    if not url or not groq_api_key:
-        st.warning("Please provide both URL and Groq API key.")
-    else:
-        with st.spinner("Scraping and building knowledge base..."):
-            content = scrape_website(url)
-            pipeline = RAGPipeline(groq_api_key=groq_api_key)
-            pipeline.build_knowledge_base(content)
-            st.session_state.pipeline = pipeline
-        st.success("Knowledge base built successfully!")
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-# Chat section
-if st.session_state.pipeline:
-    user_query = st.chat_input("Ask a question about the website...")
 
-    if user_query:
-        st.session_state.chat_history.append(("user", user_query))
 
-        with st.spinner("Generating answer..."):
-            answer = st.session_state.pipeline.generate_answer(user_query)
+# Build Knowledge Base
 
-        st.session_state.chat_history.append(("assistant", answer))
+@app.route("/build", methods=["POST"])
+def build():
+    data = request.json
+    url = data.get("url")
+    depth = int(data.get("depth", 3))
 
-    # Display chat
-    for role, message in st.session_state.chat_history:
-        if role == "user":
-            st.chat_message("user").write(message)
-        else:
-            st.chat_message("assistant").write(message)
+    if not url:
+        return jsonify({"error": "URL is required."})
+
+    try:
+        # Scrape website
+        content = scrape_website(url, max_pages=depth)
+
+        if not content.strip():
+            return jsonify({"error": "No content scraped from website."})
+
+        # Create and store pipeline inside Flask app
+        app.pipeline = RAGPipeline(groq_api_key=groq_api_key)
+        app.pipeline.build_knowledge_base(content)
+
+        return jsonify({"message": "Knowledge base built successfully!"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+
+# Ask Question
+
+@app.route("/ask", methods=["POST"])
+def ask():
+    data = request.json
+    question = data.get("question")
+
+    if not question:
+        return jsonify({"error": "Question is required."})
+
+    # Check if knowledge base exists
+    if not hasattr(app, "pipeline"):
+        return jsonify({"error": "Knowledge base not built yet."})
+
+    try:
+        answer = app.pipeline.generate_answer(question)
+        return jsonify({"answer": answer})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+
+# Run App
+
+if __name__ == "__main__":
+    app.run(debug=False)
