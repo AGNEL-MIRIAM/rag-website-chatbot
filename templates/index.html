@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RAG Website Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+
+    <h1>🌐 RAG Website Chatbot</h1>
+
+    <div class="config-section">
+        <input type="text" id="urlInput" placeholder="Enter Website URL">
+        <input type="number" id="depthInput" value="3" min="1" max="10">
+        <button id="buildBtn" onclick="buildKnowledgeBase()">Build</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div id="chatContainer" class="chat-container"></div>
+
+    <div class="chat-input">
+        <input type="text" id="questionInput" placeholder="Ask a question..." disabled onkeypress="handleKeyPress(event)">
+        <button id="sendBtn" onclick="askQuestion()" disabled>Send</button>
+    </div>
+
+</div>
+
+<script>
+
+let knowledgeBuilt = false;
+
+async function buildKnowledgeBase() {
+    const url = document.getElementById("urlInput").value;
+    const depth = document.getElementById("depthInput").value;
+    const statusDiv = document.getElementById("status");
+    const buildBtn = document.getElementById("buildBtn");
+
+    if (!url) {
+        alert("Please enter a URL.");
+        return;
+    }
+
+    buildBtn.disabled = true;
+    statusDiv.innerHTML = "⏳ Building knowledge base...";
+
+    const response = await fetch("/build", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ url: url, depth: parseInt(depth) })
+    });
+
+    const data = await response.json();
+
+    buildBtn.disabled = false;
+
+    if (data.error) {
+        statusDiv.innerHTML = "❌ " + data.error;
+        knowledgeBuilt = false;
+    } else {
+        statusDiv.innerHTML = "✅ Knowledge base ready!";
+        knowledgeBuilt = true;
+        enableChat();
+        clearChat();
+    }
+}
+
+async function askQuestion() {
+    if (!knowledgeBuilt) return;
+
+    const questionInput = document.getElementById("questionInput");
+    const question = questionInput.value.trim();
+    if (!question) return;
+
+    addMessage("user", question);
+    questionInput.value = "";
+
+    addMessage("assistant", "⏳ Thinking...");
+
+    const response = await fetch("/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ question: question })
+    });
+
+    const data = await response.json();
+
+    removeLastMessage();
+
+    if (data.error) {
+        addMessage("assistant", "❌ " + data.error);
+    } else {
+        addMessage("assistant", data.answer);
+    }
+}
+
+function addMessage(role, text) {
+    const chatContainer = document.getElementById("chatContainer");
+    const msg = document.createElement("div");
+    msg.className = role === "user" ? "user-message" : "assistant-message";
+    msg.innerText = text;
+    chatContainer.appendChild(msg);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function removeLastMessage() {
+    const chatContainer = document.getElementById("chatContainer");
+    chatContainer.removeChild(chatContainer.lastChild);
+}
+
+function enableChat() {
+    document.getElementById("questionInput").disabled = false;
+    document.getElementById("sendBtn").disabled = false;
+}
+
+function clearChat() {
+    document.getElementById("chatContainer").innerHTML = "";
+}
+
+function handleKeyPress(event) {
+    if (event.key === "Enter") {
+        askQuestion();
+    }
+}
+
+</script>
+
+</body>
+</html>
+
+<div class="footer">
+    Built with Flask + FAISS + Groq Llama 3 | RAG Website Chatbot
+</div>
